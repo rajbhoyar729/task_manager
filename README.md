@@ -1,4 +1,3 @@
-```markdown
 # Task Manager API
 **RESTful API for managing tasks with JWT authentication**
 
