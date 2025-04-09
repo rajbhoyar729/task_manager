@@ -2,6 +2,11 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from app import mongo
 from app.utils.exceptions import CustomException
 from bson import ObjectId
+import re
+from typing import Optional, Dict, Any
+import uuid
+from datetime import datetime, timedelta
+import pytz
 
 class User:
     """
@@ -13,7 +18,7 @@ class User:
         id (ObjectId, optional): MongoDB document ID (automatically generated).
     """
     
-    def __init__(self, username: str, password_hash: str, id: ObjectId = None):
+    def __init__(self, username: str, password_hash: str, id: Optional[ObjectId] = None):
         self.username = username
         self.password_hash = password_hash
         self.id = id
@@ -34,17 +39,17 @@ class User:
             CustomException: If username already exists or validation fails.
         """
         # Validate input
-        if len(username) < 3:
+        if not cls._validate_username(username):
             raise CustomException("Username must be at least 3 characters", 400)
-        if len(password) < 8:
-            raise CustomException("Password must be at least 8 characters", 400)
+        if not cls._validate_password(password):
+            raise CustomException("Password must be at least 8 characters and include uppercase, lowercase, and a number", 400)
         
-        # Check for existing user [[1]][[4]]
+        # Check for existing user
         existing_user = mongo.db.users.find_one({'username': username})
         if existing_user:
             raise CustomException("Username already exists", 409)
         
-        # Hash password and insert into MongoDB [[6]][[7]]
+        # Hash password and insert into MongoDB
         password_hash = generate_password_hash(password)
         result = mongo.db.users.insert_one({
             'username': username,
@@ -53,7 +58,7 @@ class User:
         return cls(username, password_hash, id=result.inserted_id)
 
     @classmethod
-    def get_by_username(cls, username: str) -> 'User':
+    def get_by_username(cls, username: str) -> Optional['User']:
         """
         Retrieves a user by their username.
         
@@ -67,7 +72,7 @@ class User:
         return cls(**user_data) if user_data else None
 
     @classmethod
-    def get_by_id(cls, user_id: ObjectId) -> 'User':
+    def get_by_id(cls, user_id: ObjectId) -> Optional['User']:
         """
         Retrieves a user by their MongoDB ObjectId.
         
@@ -102,11 +107,98 @@ class User:
         Raises:
             CustomException: If password validation fails.
         """
-        if len(new_password) < 8:
-            raise CustomException("Password must be at least 8 characters", 400)
+        if not self._validate_password(new_password):
+            raise CustomException("Password must be at least 8 characters and include uppercase, lowercase, and a number", 400)
         new_hash = generate_password_hash(new_password)
         mongo.db.users.update_one(
             {'_id': self.id},
             {'$set': {'password_hash': new_hash}}
         )
         self.password_hash = new_hash
+
+    def generate_password_reset_token(self, expires_in: int = 3600) -> str:
+        """
+        Generates a password reset token for the user.
+        
+        Args:
+            expires_in (int): Number of seconds until the token expires (default: 3600).
+        
+        Returns:
+            str: The password reset token.
+        """
+        token = str(uuid.uuid4())
+        mongo.db.users.update_one(
+            {'_id': self.id},
+            {'$set': {
+                'reset_token': token,
+                'reset_token_expiry': datetime.now(pytz.utc) + timedelta(seconds=expires_in)
+            }}
+        )
+        return token
+
+    @classmethod
+    def reset_password(cls, token: str, new_password: str) -> bool:
+        """
+        Resets the user's password using a valid reset token.
+        
+        Args:
+            token (str): The password reset token.
+            new_password (str): The new password to set.
+        
+        Returns:
+            bool: True if password was reset successfully, else False.
+        """
+        user_data = mongo.db.users.find_one({
+            'reset_token': token,
+            'reset_token_expiry': {'$gt': datetime.now(pytz.utc)}
+        })
+        if not user_data:
+            return False
+        
+        user = cls(**user_data)
+        user.update_password(new_password)
+        mongo.db.users.update_one(
+            {'_id': user.id},
+            {'$unset': {'reset_token': "", 'reset_token_expiry': ""}}
+        )
+        return True
+
+    @staticmethod
+    def _validate_username(username: str) -> bool:
+        """
+        Validates that the username meets the minimum length requirement.
+        
+        Args:
+            username (str): The username to validate.
+        
+        Returns:
+            bool: True if valid, else False.
+        """
+        return username and len(username.strip()) >= 3
+
+    @staticmethod
+    def _validate_password(password: str) -> bool:
+        """
+        Validates that the password meets complexity requirements.
+        
+        Args:
+            password (str): The password to validate.
+        
+        Returns:
+            bool: True if valid, else False.
+        
+        Rules:
+            - Password must be at least 8 characters long.
+            - Must contain at least one uppercase letter.
+            - Must contain at least one lowercase letter.
+            - Must contain at least one digit.
+        """
+        if len(password) < 8:
+            return False
+        if not re.search(r'[A-Z]', password):
+            return False
+        if not re.search(r'[a-z]', password):
+            return False
+        if not re.search(r'\d', password):
+            return False
+        return True

@@ -3,8 +3,48 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.services.task_service import TaskService
 from app.utils.exceptions import CustomException
 from app.utils.validators import validate_task_data
+from pydantic import BaseModel, ValidationError, validator
+from typing import Dict, Optional, List
 
 tasks_bp = Blueprint('tasks', __name__)
+
+# Pydantic model for task creation
+class TaskCreateRequest(BaseModel):
+    title: str
+    description: Optional[str] = None
+    status: str
+
+    @validator('title')
+    def title_min_length(cls, v):
+        if len(v.strip()) < 3:
+            raise ValueError("Title must be at least 3 characters")
+        return v
+
+    @validator('status')
+    def status_must_be_valid(cls, v):
+        allowed_statuses = ['pending', 'in-progress', 'completed']
+        if v not in allowed_statuses:
+            raise ValueError(f"Status must be one of {allowed_statuses}")
+        return v
+
+# Pydantic model for task update
+class TaskUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+
+    @validator('title')
+    def title_min_length(cls, v):
+        if v and len(v.strip()) < 3:
+            raise ValueError("Title must be at least 3 characters")
+        return v
+
+    @validator('status')
+    def status_must_be_valid(cls, v):
+        allowed_statuses = ['pending', 'in-progress', 'completed']
+        if v and v not in allowed_statuses:
+            raise ValueError(f"Status must be one of {allowed_statuses}")
+        return v
 
 @tasks_bp.route('/tasks', methods=['POST'])
 @jwt_required()
@@ -20,22 +60,17 @@ def create_task():
         201: Task created successfully.
         400: Invalid input data.
     """
+    try:
+        data = TaskCreateRequest(**request.get_json())
+    except ValidationError as e:
+        raise CustomException(str(e), 400)
+
     user_id = get_jwt_identity()
-    data = request.get_json()
-    title = data.get('title')
-    description = data.get('description', '')
-    status = data.get('status', 'pending')
-
-    # Validate input [[3]][[6]]
-    if not validate_task_data(title, status):
-        raise CustomException("Invalid task data", 400)
-
-    # Create task via service layer [[8]]
     task_id, error = TaskService.create_task(
         user_id=user_id,
-        title=title,
-        description=description,
-        status=status
+        title=data.title,
+        description=data.description,
+        status=data.status
     )
     if error:
         raise CustomException(error, 400)
@@ -45,14 +80,42 @@ def create_task():
 @tasks_bp.route('/tasks', methods=['GET'])
 @jwt_required()
 def get_tasks():
-    """Retrieve all tasks for the authenticated user.
+    """Retrieve tasks for the authenticated user with pagination, sorting, and filtering.
+    
+    Query Parameters:
+        - page (int, optional): Page number (default: 1).
+        - limit (int, optional): Number of tasks per page (default: 20).
+        - sort_by (str, optional): Field to sort by (title, status, created_at).
+        - sort_order (str, optional): Sort order (asc, desc).
+        - status (str, optional): Filter tasks by status.
+        - title (str, optional): Filter tasks by title.
     
     Responses:
         200: List of tasks.
     """
     user_id = get_jwt_identity()
-    tasks = TaskService.get_user_tasks(user_id)
-    return jsonify(tasks), 200
+    page = int(request.args.get('page', 1))
+    limit = int(request.args.get('limit', 20))
+    sort_by = request.args.get('sort_by', 'created_at')
+    sort_order = request.args.get('sort_order', 'desc')
+    status_filter = request.args.get('status')
+    title_filter = request.args.get('title')
+
+    tasks, total = TaskService.get_user_tasks(
+        user_id=user_id,
+        page=page,
+        limit=limit,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        status_filter=status_filter,
+        title_filter=title_filter
+    )
+    return jsonify({
+        'tasks': tasks,
+        'total': total,
+        'page': page,
+        'limit': limit
+    }), 200
 
 @tasks_bp.route('/tasks/<task_id>', methods=['GET'])
 @jwt_required()
@@ -84,12 +147,13 @@ def update_task_put(task_id):
         400: Invalid data.
         404: Task not found.
     """
+    try:
+        data = TaskCreateRequest(**request.get_json())
+    except ValidationError as e:
+        raise CustomException(str(e), 400)
+
     user_id = get_jwt_identity()
-    data = request.get_json()
-    required_fields = ['title', 'description', 'status']
-    if not all(field in data for field in required_fields):
-        raise CustomException("Missing required fields", 400)
-    task, error = TaskService.update_task(user_id, task_id, data)
+    task, error = TaskService.update_task(user_id, task_id, data.dict())
     if error:
         raise CustomException(error, 400)
     return jsonify(task), 200
@@ -106,12 +170,16 @@ def update_task_patch(task_id):
     
     Responses:
         200: Updated task details.
-        400: Invalid status.
+        400: Invalid data.
         404: Task not found.
     """
+    try:
+        data = TaskUpdateRequest(**request.get_json())
+    except ValidationError as e:
+        raise CustomException(str(e), 400)
+
     user_id = get_jwt_identity()
-    updates = request.get_json()
-    task, error = TaskService.update_task(user_id, task_id, updates)
+    task, error = TaskService.update_task(user_id, task_id, data.dict(exclude_unset=True))
     if error:
         raise CustomException(error, 400)
     return jsonify(task), 200

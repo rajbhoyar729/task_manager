@@ -1,36 +1,100 @@
-from dotenv import load_dotenv
-import os
+from decouple import Config, RepositoryEnv, UndefinedValueError
+from typing import Optional, Type, TypeVar, Union, Dict, Any
+from app.utils.exceptions import CustomException
 
-load_dotenv()  # Load variables from .env [[2]][[3]]
+# Define type variables for configuration classes
+T = TypeVar('T', bound='BaseConfig')
 
-class Config:
-    # Base configuration [[6]]
-    DEBUG = False
-    TESTING = False
-    MONGO_URI = os.getenv("DATABASE_URI", "mongodb://localhost:27017/taskmanager")
-    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "fallback-secret-key")
-    RATELIMIT_DEFAULT = "200 per day;50 per hour"  # Rate limiting [[7]][[9]]
-    RATELIMIT_HEADERS_ENABLED = True
+class BaseConfig:
+    
+    def __init__(self, config: Config):
+        self._config = config
 
-class DevelopmentConfig(Config):
-    DEBUG = True
-    MONGO_URI = os.getenv("DATABASE_URI", "mongodb://localhost:27017/taskmanager_dev")  # Separate DB for dev [[1]]
-    RATELIMIT_ENABLED = False  # Disable rate limiting in development [[9]]
+    @classmethod
+    def from_env(cls: Type[T], env_file: Optional[str] = None) -> T:
+        
+        if env_file:
+            config = Config(RepositoryEnv(env_file))
+        else:
+            config = Config()
+        return cls(config)
 
-class ProductionConfig(Config):
-    MONGO_URI = os.getenv("DATABASE_URI")  # Require explicit production URI [[2]]
-    RATELIMIT_ENABLED = True  # Enable rate limiting in production [[7]]
+    def _get(self, key: str, cast: type = str, default: Any = None) -> Any:
+        
+        try:
+            return self._config(key, cast=cast)
+        except UndefinedValueError:
+            if default is not None:
+                return default
+            raise CustomException(f"Missing required environment variable: {key}", 500)
 
-class TestingConfig(Config):
-    TESTING = True
-    MONGO_URI = os.getenv("TEST_DATABASE_URI", "mongodb://localhost:27017/taskmanager_test")  # Isolated test DB [[5]]
+    @property
+    def DEBUG(self) -> bool:
+        """Enable debug mode."""
+        return self._get('DEBUG', cast=bool, default=False)
 
-def get_config():
-    """Return the appropriate config class based on FLASK_ENV"""
-    env = os.getenv("FLASK_ENV", "development")
+    @property
+    def TESTING(self) -> bool:
+        """Enable testing mode."""
+        return self._get('TESTING', cast=bool, default=False)
+
+    @property
+    def MONGO_URI(self) -> str:
+        """MongoDB connection URI."""
+        return self._get('DATABASE_URI', cast=str)
+
+    @property
+    def JWT_SECRET_KEY(self) -> str:
+        """Secret key for JWT encoding/decoding."""
+        return self._get('JWT_SECRET_KEY', cast=str)
+
+    @property
+    def RATELIMIT_ENABLED(self) -> bool:
+        """Enable rate limiting."""
+        return self._get('RATELIMIT_ENABLED', cast=bool, default=True)
+
+    @property
+    def RATELIMIT_DEFAULT(self) -> str:
+        """Default rate limit string."""
+        return self._get('RATELIMIT_DEFAULT', cast=str, default="200 per day;50 per hour")
+
+    @property
+    def RATELIMIT_HEADERS_ENABLED(self) -> bool:
+        """Enable rate limit headers."""
+        return self._get('RATELIMIT_HEADERS_ENABLED', cast=bool, default=True)
+
+class DevelopmentConfig(BaseConfig):
+    """Configuration for development environment."""
+    @property
+    def DEBUG(self) -> bool:
+        return True
+
+    @property
+    def RATELIMIT_ENABLED(self) -> bool:
+        return False
+
+class ProductionConfig(BaseConfig):
+    """Configuration for production environment."""
+    @property
+    def RATELIMIT_ENABLED(self) -> bool:
+        return True
+
+class TestingConfig(BaseConfig):
+    """Configuration for testing environment."""
+    @property
+    def TESTING(self) -> bool:
+        return True
+
+def get_config(env_file: Optional[str] = None) -> BaseConfig:
+    
+    env = os.getenv('FLASK_ENV', 'development')
     config_map = {
-        "development": DevelopmentConfig,
-        "production": ProductionConfig,
-        "testing": TestingConfig
+        'development': DevelopmentConfig,
+        'production': ProductionConfig,
+        'testing': TestingConfig
     }
-    return config_map.get(env, DevelopmentConfig)
+    config_class = config_map.get(env, DevelopmentConfig)
+    return config_class.from_env(env_file)
+
+# Global configuration instance
+config = get_config()
