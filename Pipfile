@@ -12,6 +12,7 @@ flask-pymongo = "*"
 flask-jwt-extended = "*"
 python-dotenv = "*"
 flask-limiter = "*"
+python-decouple = "*"
 
 [dev-packages]
 pytest = "*"
