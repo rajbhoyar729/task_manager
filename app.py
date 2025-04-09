@@ -1,5 +1,6 @@
 import logging
 import argparse
+import os  # Import os to set environment variables
 from app import create_app
 
 # Configure logging
@@ -15,10 +16,14 @@ def main():
     
     Initializes the app, configures logging, and runs the server.
     """
+    # Parse command-line arguments
     parser = argparse.ArgumentParser(description='Task Manager API')
     parser.add_argument('--env', default='development', choices=['development', 'production', 'testing'],
                         help='Environment to run the application in (default: development)')
     args = parser.parse_args()
+
+    # Synchronize FLASK_ENV with the --env argument
+    os.environ['FLASK_ENV'] = args.env
 
     # Create the Flask app with the specified environment
     app = create_app()

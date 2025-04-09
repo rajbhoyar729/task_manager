@@ -6,7 +6,7 @@ from flask_jwt_extended import JWTManager
 from flask_pymongo import PyMongo
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from app.config import get_config, Config
+from app.config import get_config
 from app.utils.exceptions import CustomException
 from dotenv import load_dotenv
 
@@ -29,7 +29,7 @@ class RequestIDFilter(logging.Filter):
         return True
 
 def create_app():
-   
+    """Factory function to create and configure the Flask application."""
     # Create the Flask app
     app = Flask(__name__)
 

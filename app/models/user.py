@@ -69,7 +69,13 @@ class User:
             User: The user instance if found, else None.
         """
         user_data = mongo.db.users.find_one({'username': username})
-        return cls(**user_data) if user_data else None
+        if user_data:
+            return cls(
+                username=user_data['username'],
+                password_hash=user_data['password_hash'],
+                id=user_data['_id']
+            )
+        return None
 
     @classmethod
     def get_by_id(cls, user_id: ObjectId) -> Optional['User']:
@@ -83,7 +89,13 @@ class User:
             User: The user instance if found, else None.
         """
         user_data = mongo.db.users.find_one({'_id': user_id})
-        return cls(**user_data) if user_data else None
+        if user_data:
+            return cls(
+                username=user_data['username'],
+                password_hash=user_data['password_hash'],
+                id=user_data['_id']
+            )
+        return None
 
     def check_password(self, password: str) -> bool:
         """
@@ -155,7 +167,11 @@ class User:
         if not user_data:
             return False
         
-        user = cls(**user_data)
+        user = cls(
+            username=user_data['username'],
+            password_hash=user_data['password_hash'],
+            id=user_data['_id']
+        )
         user.update_password(new_password)
         mongo.db.users.update_one(
             {'_id': user.id},
