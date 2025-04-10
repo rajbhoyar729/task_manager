@@ -1,5 +1,5 @@
 import os
-from decouple import Config, RepositoryEnv, UndefinedValueError
+from decouple import Config, RepositoryEnv, RepositoryEmpty, UndefinedValueError
 from typing import Optional, Type, TypeVar, Union, Dict, Any
 from app.utils.exceptions import CustomException
 
@@ -13,15 +13,36 @@ class BaseConfig:
 
     @classmethod
     def from_env(cls: Type[T], env_file: Optional[str] = None) -> T:
+        """
+        Create a config instance from an environment file or system environment variables.
         
-        if env_file:
+        Args:
+            env_file (Optional[str]): Path to the .env file. If None, use system env vars.
+        
+        Returns:
+            T: An instance of the configuration class.
+        """
+        if env_file and os.path.exists(env_file):
             config = Config(RepositoryEnv(env_file))
         else:
-            config = Config()
+            config = Config(RepositoryEmpty())  # Fallback to system environment variables
         return cls(config)
 
     def _get(self, key: str, cast: type = str, default: Any = None) -> Any:
+        """
+        Get a configuration value with type casting and fallback default.
         
+        Args:
+            key (str): The environment variable key.
+            cast (type): Type to cast the value to.
+            default (Any): Default value if the key is missing.
+        
+        Returns:
+            Any: The cast value or default.
+        
+        Raises:
+            CustomException: If the key is missing and no default is provided.
+        """
         try:
             return self._config(key, cast=cast)
         except UndefinedValueError:
@@ -87,7 +108,15 @@ class TestingConfig(BaseConfig):
         return True
 
 def get_config(env_file: Optional[str] = None) -> BaseConfig:
+    """
+    Get the appropriate configuration based on the FLASK_ENV environment variable.
     
+    Args:
+        env_file (Optional[str]): Path to an optional .env file.
+    
+    Returns:
+        BaseConfig: The configuration instance.
+    """
     env = os.getenv('FLASK_ENV', 'development')
     config_map = {
         'development': DevelopmentConfig,
